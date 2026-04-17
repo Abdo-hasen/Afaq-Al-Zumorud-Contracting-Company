@@ -1,43 +1,34 @@
-# 🔧 Afaq Al-Zumorud Contracting Co. — On-Site Field Services Platform
+# 🧭 Omanyzer — Tourism & Guide Booking Platform
 
-> A full-featured **on-site services** platform built with **Laravel 11**, connecting **clients** with **technicians** through **service orders**, scheduling, and operational workflows.
-> The system includes a **mobile-facing REST API** and a **fully operational admin dashboard** for day-to-day management.
+> A full-featured tourism management platform built with **Laravel 11**, connecting **travelers** with local **guides** across Oman.
+> The system includes a mobile-facing REST API and a fully operational admin dashboard.
 
 ---
 
 ## ✨ Features
 
-### 👤 Client (Mobile API)
+### 👤 Traveler (Mobile API)
 
-- OTP (SMS) + email/password login, forgot password & reset link flow
-- Browse services and place orders — **ASAP** or **scheduled date + time slot**
-- Track order status and step timeline (accepted → on the way → on-site → done)
-- Receive, approve or reject **price quotations** with line-item breakdown
-- Invoice details (items, VAT, total, paid state) and payment method summary
-- **Push notifications** (FCM) for key order events (accepted, quote ready, completed)
-- Post-service **rating** — star score, and optional comment
+- OTP-based registration & login via WhatsApp
+- Browse events by city & category
+- Select guides and book across multiple dates
+- pay with cash and visa
+- Leave reviews and manage favorites
 
-### 🔨 Technician (Mobile API)
+### 🧑‍🏫 Guide (Mobile API)
 
-- **Online / offline** availability toggle — only receives jobs when active
-- Home dashboard with **current active task**, quick actions, and map context
-- Full task details: job photos, address, problem description, client info
-- **Create quotations** with multiple line items (service, qty, unit price, total)
-- My jobs list filtered by status (all / pending / in progress / completed)
-- Rate the **client** after job completion — two-way feedback
-
-### 🌐 Public 
-
-- Services catalog, settings, and banners
+- Apply to become a guide (approval flow)
+- Manage bookings and availability per date
+- Wallet balance & withdrawal requests
 
 ### 🛠️ Admin Dashboard
 
-- Full management: Users, Technicians, Services, Orders, Quotations, Settings
-- **Block days**: recurring weekday rules and one-off dates per service
-- Role-based staff permissions (Spatie)
-- Multi-language support (Arabic / English)
-- Real-time stats and order charts
+- Full management: Users, Guides, Events, Cities, Categories, Banners
+- Booking & withdrawal oversight
 - Firebase push notifications (custom & bulk)
+- Role-based permissions (Spatie)
+- Multi-language support (Arabic / English)
+- Real-time statistics & monthly charts
 
 ---
 
@@ -47,12 +38,12 @@
 | Layer       | Technology                                 |
 | ----------- | ------------------------------------------ |
 | Backend     | Laravel 11 (PHP 8.2)                       |
-| Auth        | Laravel Sanctum + OTP (SMS)                |
+| Auth        | Laravel Sanctum + OTP (WhatsApp)           |
 | Admin UI    | Blade + Yajra DataTables                   |
-| Permissions | Spatie Laravel Permission                  |
+| Permissions | Spatie Laravel Permission (admin staff)    |
 | Media       | Spatie Laravel MediaLibrary                |
 | i18n        | Spatie Translatable + Laravel Localization |
-| Payments    | Moyasar Payment Integration                |
+| Payments    | AmwalPay Integration                       |
 | Push        | Firebase Cloud Messaging (FCM)             |
 | Export      | Maatwebsite Excel + MisterSpelik PDF       |
 | Monitoring  | Laravel Telescope                          |
@@ -69,11 +60,11 @@
 │   │   ├── Services/         # Business logic layer
 │   │   ├── Datatables/       # Yajra DataTable definitions
 │   │   ├── Enums/            # Type-safe constants
-│   │   ├── Helpers/          # Firebase, media, OTP
+│   │   ├── Helpers/          # Firebase
 │   │   └── Traits/           # InteractWithResponse, HasDatatableTrait
 ├── routes/
 │   ├── admin.php             # Admin dashboard routes
-│   └── apis/v1/              # auth · client · technician · public · notifications
+│   └── apis/                 # Versioned API routes (public, user, guide, auth, notification)
 └── resources/views/          # Blade templates
 ```
 
@@ -81,27 +72,37 @@
 
 ## 🧩 Technical Challenges & Solutions
 
-### 1. Blocking weekdays vs blocking single dates
+### 1. Unified User Table for Travelers & Guides
 
-**Challenge:** Admin sets rules like "no bookings every Friday" or "close Dec 25." The mobile calendar needs a ready list of disabled days — and the server must enforce the same rules when an order is saved.
+**Challenge:** The platform has two user types — travelers and guides — that share most of their data (name, phone, wallet, bookings). Creating a separate table and guard for each would mean duplicated migrations, duplicated auth logic, and unnecessary complexity.
 
-**Solution:** Store two rule types: **recurring weekday** and **specific date**. On request, expand weekday rules into real dates only within a configurable rolling window (e.g. next 2 months), merge in one-off dates, deduplicate, and return the sorted list. Order validation re-runs the same check so the UI and the API always agree.
-
----
-
-### 2. Cash / POS handover — two-party OTP confirmation
-
-**Challenge:** After a technician collects cash or processes a POS payment, the business needs proof the right amount was handed over — not just a verbal claim.
-
-**Solution:** Generate a **short-lived, single-use OTP** tied to the order and amount. The technician receives it via SMS; the customer writes it back. The server verifies once, logs the confirmation, and marks the payment as handed over. Codes expire and are scoped to one order so they cannot be reused or guessed across jobs.
+**Solution:** Both types live in a single `users` table with a dedicated `**role`** column backed by a PHP enum (`traveler` / `guide`). The same `User` model and Sanctum guard serve both apps; controllers and services branch behavior from that enum.
 
 ---
 
-### 3. OTP behavior controlled by environment
+### 2. Three-Phase Traveler Booking Flow
 
-**Challenge:** Production must send real random codes via SMS. Development and staging should use a fixed known code and skip SMS entirely, without touching the codebase.
+**Challenge:** A booking is not a single “submit form” action. The traveler must discover who is available, understand pricing and rules before paying, and only then lock a reservation — without creating half-valid records or race conditions between steps.
 
-**Solution:** Two env flags drive the behavior — `RANDOM_OTP` (true = random, false = fixed dev code) and `SEND_OTP_SMS` (true = send SMS, false = skip). A bypass phone-number list allows QA testers to always receive a predictable code. Neither bypass mechanism is active in production.
+**Solution:** The flow has **three simple steps**: (1) list **guides who are free** for the event and dates; (2) **preview** — check the request again and return **price breakdown** for the screen before payment; (3) **save the booking** only when the traveler confirms. The server **checks availability again** on preview and on save, so an outdated pick from an earlier screen cannot become a real booking by mistake.
+
+---
+
+### 3. Multi-Date Guide Availability Conflict Detection
+
+**Challenge:** When a traveler books a guide, they may select multiple dates at once. The system must guarantee that the chosen guide is fully available across *every* selected date — not just some of them. A guide who is booked on even one of those dates must not appear as available.
+
+**Solution:** The availability check works at the database query level by counting how many of the requested dates conflict with the guide's existing bookings. Only guides with zero conflicts across all selected dates are returned as available. This prevents partial-availability issues before they reach the application layer.
+
+**Performance & scalability:** Composite **database indexes** on **guide** and **date** fields keep those lookups cheap as bookings and calendar rows grow—so the feature stays responsive under heavier load instead of degrading into full table scans.
+
+---
+
+### 4. Bulk Firebase Notifications (Rate Limits, Delays & Jobs)
+
+**Challenge:** Sending push notifications to a large audience from the admin panel can hit **FCM quotas**, **HTTP timeouts**, and **unreliable partial delivery** if the server tries to send synchronously in one request. Retries can also **duplicate** messages without careful design.
+
+**Solution:** Treat bulk sends as **asynchronous work**: enqueue **dedicated queue jobs** (e.g. **one job per user/token batch**) instead of sending inside the web request. Between sends, apply a controlled **delay/backoff** so traffic stays under FCM limits and workers stay healthy. Optionally group tokens into **FCM multicast chunks** where the API allows, while still keeping **per-user failure isolation** and **retry**  in the queue layer.
 
 ---
 
@@ -111,7 +112,7 @@
 
 ---
 
-### 📱 Mobile App
+### 📱 Mobile App — Booking Flow
 
 ---
 
