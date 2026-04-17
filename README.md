@@ -1,34 +1,43 @@
-# 🧭 Omanyzer — Tourism & Guide Booking Platform
+# 🔧 Afaq Al-Zumorud Contracting Co. — On-Site Field Services Platform
 
-> A full-featured tourism management platform built with **Laravel 11**, connecting **travelers** with local **guides** across Oman.
-> The system includes a mobile-facing REST API and a fully operational admin dashboard.
+> A full-featured **on-site services** platform built with **Laravel 11**, connecting **clients** with **technicians** through **service orders**, scheduling, and operational workflows.
+> The system includes a **mobile-facing REST API** and a **fully operational admin dashboard** for day-to-day management.
 
 ---
 
 ## ✨ Features
 
-### 👤 Traveler (Mobile API)
+### 👤 Client (Mobile API)
 
-- OTP-based registration & login via WhatsApp
-- Browse events by city & category
-- Select guides and book across multiple dates
-- pay with cash and visa
-- Leave reviews and manage favorites
+- OTP (SMS) + email/password login, forgot password & reset link flow
+- Browse services and place orders — **ASAP** or **scheduled date + time slot**
+- Track order status and step timeline (accepted → on the way → on-site → done)
+- Receive, approve or reject **price quotations** with line-item breakdown
+- Invoice details (items, VAT, total, paid state) and payment method summary
+- **Push notifications** (FCM) for key order events (accepted, quote ready, completed)
+- Post-service **rating** — star score, and optional comment
 
-### 🧑‍🏫 Guide (Mobile API)
+### 🔨 Technician (Mobile API)
 
-- Apply to become a guide (approval flow)
-- Manage bookings and availability per date
-- Wallet balance & withdrawal requests
+- **Online / offline** availability toggle — only receives jobs when active
+- Home dashboard with **current active task**, quick actions, and map context
+- Full task details: job photos, address, problem description, client info
+- **Create quotations** with multiple line items (service, qty, unit price, total)
+- My jobs list filtered by status (all / pending / in progress / completed)
+- Rate the **client** after job completion — two-way feedback
+
+### 🌐 Public 
+
+- Services catalog, settings, and banners
 
 ### 🛠️ Admin Dashboard
 
-- Full management: Users, Guides, Events, Cities, Categories, Banners
-- Booking & withdrawal oversight
-- Firebase push notifications (custom & bulk)
-- Role-based permissions (Spatie)
+- Full management: Users, Technicians, Services, Orders, Quotations, Settings
+- **Block days**: recurring weekday rules and one-off dates per service
+- Role-based staff permissions (Spatie)
 - Multi-language support (Arabic / English)
-- Real-time statistics & monthly charts
+- Real-time stats and order charts
+- Firebase push notifications (custom & bulk)
 
 ---
 
@@ -38,12 +47,12 @@
 | Layer       | Technology                                 |
 | ----------- | ------------------------------------------ |
 | Backend     | Laravel 11 (PHP 8.2)                       |
-| Auth        | Laravel Sanctum + OTP (WhatsApp)           |
+| Auth        | Laravel Sanctum + OTP (SMS)                |
 | Admin UI    | Blade + Yajra DataTables                   |
-| Permissions | Spatie Laravel Permission (admin staff)    |
+| Permissions | Spatie Laravel Permission                  |
 | Media       | Spatie Laravel MediaLibrary                |
 | i18n        | Spatie Translatable + Laravel Localization |
-| Payments    | AmwalPay Integration                       |
+| Payments    | Moyasar Payment Integration                |
 | Push        | Firebase Cloud Messaging (FCM)             |
 | Export      | Maatwebsite Excel + MisterSpelik PDF       |
 | Monitoring  | Laravel Telescope                          |
@@ -60,11 +69,11 @@
 │   │   ├── Services/         # Business logic layer
 │   │   ├── Datatables/       # Yajra DataTable definitions
 │   │   ├── Enums/            # Type-safe constants
-│   │   ├── Helpers/          # Firebase
+│   │   ├── Helpers/          # Firebase, media, OTP
 │   │   └── Traits/           # InteractWithResponse, HasDatatableTrait
 ├── routes/
 │   ├── admin.php             # Admin dashboard routes
-│   └── apis/                 # Versioned API routes (public, user, guide, auth, notification)
+│   └── apis/v1/              # auth · client · technician · public · notifications
 └── resources/views/          # Blade templates
 ```
 
@@ -72,29 +81,27 @@
 
 ## 🧩 Technical Challenges & Solutions
 
-### 1. Unified User Table for Travelers & Guides
+### 1. Blocking weekdays vs blocking single dates
 
-**Challenge:** The platform has two user types — travelers and guides — that share most of their data (name, phone, wallet, bookings). Creating a separate table and guard for each would mean duplicated migrations, duplicated auth logic, and unnecessary complexity.
+**Challenge:** Admin sets rules like "no bookings every Friday" or "close Dec 25." The mobile calendar needs a ready list of disabled days — and the server must enforce the same rules when an order is saved.
 
-**Solution:** Both types live in a single `users` table with a dedicated `**role`** column backed by a PHP enum (`traveler` / `guide`). The same `User` model and Sanctum guard serve both apps; controllers and services branch behavior from that enum.
-
----
-
-### 2. Three-Phase Traveler Booking Flow
-
-**Challenge:** A booking is not a single “submit form” action. The traveler must discover who is available, understand pricing and rules before paying, and only then lock a reservation — without creating half-valid records or race conditions between steps.
-
-**Solution:** The flow has **three simple steps**: (1) list **guides who are free** for the event and dates; (2) **preview** — check the request again and return **price breakdown** for the screen before payment; (3) **save the booking** only when the traveler confirms. The server **checks availability again** on preview and on save, so an outdated pick from an earlier screen cannot become a real booking by mistake.
+**Solution:** Store two rule types: **recurring weekday** and **specific date**. On request, expand weekday rules into real dates only within a configurable rolling window (e.g. next 2 months), merge in one-off dates, deduplicate, and return the sorted list. Order validation re-runs the same check so the UI and the API always agree.
 
 ---
 
-### 3. Multi-Date Guide Availability Conflict Detection
+### 2. Cash / POS handover — two-party OTP confirmation
 
-**Challenge:** When a traveler books a guide, they may select multiple dates at once. The system must guarantee that the chosen guide is fully available across *every* selected date — not just some of them. A guide who is booked on even one of those dates must not appear as available.
+**Challenge:** After a technician collects cash or processes a POS payment, the business needs proof the right amount was handed over — not just a verbal claim.
 
-**Solution:** The availability check works at the database query level by counting how many of the requested dates conflict with the guide's existing bookings. Only guides with zero conflicts across all selected dates are returned as available. This prevents partial-availability issues before they reach the application layer.
+**Solution:** Generate a **short-lived, single-use OTP** tied to the order and amount. The technician receives it via SMS; the customer writes it back. The server verifies once, logs the confirmation, and marks the payment as handed over. Codes expire and are scoped to one order so they cannot be reused or guessed across jobs.
 
-**Performance & scalability:** Composite **database indexes** on **guide** and **date** fields keep those lookups cheap as bookings and calendar rows grow—so the feature stays responsive under heavier load instead of degrading into full table scans.
+---
+
+### 3. OTP behavior controlled by environment
+
+**Challenge:** Production must send real random codes via SMS. Development and staging should use a fixed known code and skip SMS entirely, without touching the codebase.
+
+**Solution:** Two env flags drive the behavior — `RANDOM_OTP` (true = random, false = fixed dev code) and `SEND_OTP_SMS` (true = send SMS, false = skip). A bypass phone-number list allows QA testers to always receive a predictable code. Neither bypass mechanism is active in production.
 
 ---
 
@@ -112,7 +119,7 @@
 
 ---
 
-### 📱 Mobile App — Booking Flow
+### 📱 Mobile App
 
 ---
 
