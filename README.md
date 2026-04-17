@@ -40,7 +40,11 @@
 - Firebase push notifications (custom & bulk)
 
 ---
+## 👤 My Role
 
+Built end-to-end as the **sole backend developer** — architecture, API design, admin dashboard, payment integration, and deployment.
+
+---
 ## 🏗️ Tech Stack
 
 
@@ -123,11 +127,6 @@
 
 ---
 
-## 👤 My Role
-
-Built end-to-end as the **sole backend developer** — architecture, API design, admin dashboard, payment integration, and deployment.
-
----
 
 ## 📄 License
 
