@@ -117,17 +117,6 @@ Built end-to-end as the **sole backend developer** — architecture, API design,
 
 ---
 
-## 📸 Screenshots
-
-### 🖥️ Admin Dashboard
-
----
-
-### 📱 Mobile App
-
----
-
-
 ## 📄 License
 
 Private commercial project — source shared for **portfolio purposes only**. Not for redistribution or reuse.
